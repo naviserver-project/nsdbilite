@@ -1,0 +1,212 @@
+#
+# The contents of this file are subject to the Mozilla Public License
+# Version 1.1 (the "License"); you may not use this file except in
+# compliance with the License. You may obtain a copy of the License at
+# http://mozilla.org/
+#
+# Software distributed under the License is distributed on an "AS IS"
+# basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
+# the License for the specific language governing rights and limitations
+# under the License.
+#
+# Copyright 2006 (C) Stephen Deasey <sdeasey@gmail.com>
+#
+# Alternatively, the contents of this file may be used under the terms
+# of the GNU General Public License (the "GPL"), in which case the
+# provisions of GPL are applicable instead of those above.  If you wish
+# to allow use of your version of this file only under the terms of the
+# GPL and not to allow others to use your version of this file under the
+# License, indicate your decision by deleting the provisions above and
+# replace them with the notice and other provisions required by the GPL.
+# If you do not delete the provisions above, a recipient may use your
+# version of this file under either the License or the GPL.
+#
+
+#
+# Test Suite
+#
+
+
+package require tcltest 2.2
+namespace import -force ::tcltest::*
+
+eval ::tcltest::configure $argv
+
+
+
+
+if {[catch {
+
+	catch {dbi_dml {drop table test}}
+
+    dbi_dml {
+        create table test (
+            a integer,
+            b varchar
+        )
+    }
+    dbi_dml {insert into test values (1, 'x')}
+    dbi_dml {insert into test values (2, 'y')}
+
+} err]} {
+    ns_log error $err
+} else {
+    testConstraint table true
+}
+
+
+
+test rows-1 {0 rows} -constraints table -body {
+    dbi_rows {select b from test where a = 99}
+} -result {}
+
+test rows-2 {1 row} -constraints table -body {
+    dbi_rows {select b from test where a = 1}
+} -result x
+
+test rows-3 {1 row} -constraints table -body {
+    dbi_rows {select b from test where a = 2}
+} -result y
+
+test rows-4 {2 rows} -constraints table -body {
+    dbi_rows {select b from test order by a}
+} -result {x y}
+
+test rows-5 {2 cols, 2 rows} -constraints table -body {
+    dbi_rows {select a, b from test order by a}
+} -result {1 x 2 y}
+
+test rows-6 {duplicate statement} -constraints table -body {
+    set sql {select b from test order by a}
+    dbi_rows $sql
+    dbi_rows $sql
+} -cleanup {
+    unset -nocomplain sql
+} -result {x y}
+
+test rows-7 {NULLs} -constraints table -body {
+    dbi_rows {select NULL, NULL, NULL}
+} -result {{} {} {}}
+
+
+
+test 1row-1 {expect 1 row} -constraints table -body {
+    dbi_1row {select b from test where a = 1}
+    set b
+} -cleanup {
+    unset -nocomplain b
+} -result x
+
+test 1row-2 {expect missing row} -constraints table -body {
+    dbi_1row {select b from test where a = 99}
+} -returnCodes error -result {query was not a statement returning rows}
+
+test 1row-3 {rollback suprise dml} -constraints {knownBug table} -body {
+    catch {dbi_1row {insert into test values (0, 'zzz')}} errmsg
+    list $errmsg [dbi_rows {select * from test}]
+} -result {{query was not a statement returning rows} {1 x 2 y}}
+
+
+
+test genrow-1 {generate row data} -constraints table -body {
+    dbi_1row {select 'xxx' as a}
+    set a
+} -cleanup {
+    unset -nocomplain a
+} -result xxx
+
+
+
+test syntaxError-1 {syntax error in expression} -constraints table -body {
+    dbi_1row {foo}
+} -returnCodes error -match glob -result {*error*}
+
+
+
+test dml-1 {dml rows affected} -constraints {table knownBug} -body {
+    dbi_dml {update test set b = 'z'}
+} -cleanup {
+    dbi_dml {update test set b = 'x' where a = 1}
+    dbi_dml {update test set b = 'y' where a = 2}
+} -result 2
+
+test dml-2 {duplicate statement: dml} -constraints {table knownBug} -body {
+    dbi_dml {update test set b = 'z' where a = 1}
+    dbi_dml {update test set b = 'z' where a = 1}
+} -cleanup {
+    dbi_dml {update test set b = 'x' where a = 1}
+} -result 1
+
+test dml-3 {not dml} -constraints table -body {
+	dbi_dml {select * from test}
+} -returnCodes error -result {query was not a DML or DDL command.}
+
+
+
+test bind-1 {bind vars} -body {
+	set a x
+	set b y
+	dbi_rows {select :a, :b}
+} -cleanup {
+	unset -nocomplain a b
+} -result {x y}
+
+test bind-2 {bind long vars} -body {
+	set a xxx
+	set b yyy
+	dbi_rows {select :a, :b}
+} -cleanup {
+	unset -nocomplain a b
+} -result {xxx yyy}
+
+
+
+test transaction-1 {transaction ok} -constraints table -body {
+    dbi_eval -transaction readcommitted {
+        dbi_dml  {insert into test values (3, 'z')}
+        dbi_rows {select * from test order by a}
+    }
+} -cleanup {
+    dbi_dml {delete from test where a = 3}
+} -result {1 x 2 y 3 z}
+
+test transaction-2 {transaction error w/rollback} -constraints table -body {
+    if {[catch {
+        dbi_eval -transaction repeatable {
+            dbi_dml {insert into test values (3, 'z')}
+            error "error foo"
+        }
+    } errmsg]} {
+        list $errmsg [dbi_rows {select * from test order by a}]
+    }
+} -result {{error foo} {1 x 2 y}}
+
+test transaction-3 {nested transaction} -constraints table -body {
+	set errmsg ""
+	catch {
+		dbi_eval -transaction repeatable {
+			dbi_dml  {insert into test values (3, 'z')}
+			dbi_eval -transaction repeatable {
+				dbi_dml  {update test set b = 'Z' where a = 3}
+			}
+			dbi_rows {select * from test order by a}
+		}
+	} errmsg
+
+	list $errmsg [dbi_rows {select * from test order by a}]
+
+} -cleanup {
+	unset -nocomplain errmsg
+} -result {{dbilite does not support nested transactions} {1 x 2 y}}
+
+
+
+
+
+catch {
+	dbi_dml {drop table test}
+}
+
+
+
+cleanupTests
