@@ -177,12 +177,12 @@ test bind-4 {bind binary w/binary result} -body {
 	dbi_dml {insert into test (a, b, c) values (:a, :b, :c)}
 	dbi_1row {select c as d from test where b = :b}
 
-	string equal $c $d
+	list [string bytelength $c] [string bytelength $d]
 
 } -cleanup {
 	unset -nocomplain a b c d
 	dbi_dml {delete from test where a = 9}
-} -result 1
+} -result {16 16}
 
 
 
