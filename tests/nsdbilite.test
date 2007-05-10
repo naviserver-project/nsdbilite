@@ -41,8 +41,9 @@ if {[catch {
 
     dbi_dml {
         create table test (
-            a integer,
-            b varchar
+            a integer not null,
+            b varchar not null,
+            c blob
         )
     }
     dbi_dml {insert into test values (1, 'x')}
@@ -103,7 +104,7 @@ test 1row-2 {expect missing row} -constraints table -body {
 
 test 1row-3 {rollback suprise dml} -constraints {knownBug table} -body {
     catch {dbi_1row {insert into test values (0, 'zzz')}} errmsg
-    list $errmsg [dbi_rows {select * from test}]
+    list $errmsg [dbi_rows {select a, b from test}]
 } -result {{query was not a statement returning rows} {1 x 2 y}}
 
 
@@ -138,7 +139,7 @@ test dml-2 {duplicate statement: dml} -constraints {table knownBug} -body {
 } -result 1
 
 test dml-3 {not dml} -constraints table -body {
-	dbi_dml {select * from test}
+	dbi_dml {select a, b from test}
 } -returnCodes error -result {query was not a DML or DDL command.}
 
 
@@ -159,12 +160,37 @@ test bind-2 {bind long vars} -body {
 	unset -nocomplain a b
 } -result {xxx yyy}
 
+test bind-3 {bind nulls} -body {
+	set a ""
+	set b ""
+	dbi_dml {insert into test (a, b) values (:a, :b)}
+} -cleanup {
+	unset -nocomplain a b
+} -returnCodes error -match glob -result {*NULL*}
+
+test bind-4 {bind binary w/binary result} -body {
+	set a 9
+	set b binary
+	set c [binary format a8 ""]
+	set d ""
+
+	dbi_dml {insert into test (a, b, c) values (:a, :b, :c)}
+	dbi_1row {select c as d from test where b = :b}
+
+	string equal $c $d
+
+} -cleanup {
+	unset -nocomplain a b c d
+	dbi_dml {delete from test where a = 9}
+} -result 1
+
+
 
 
 test transaction-1 {transaction ok} -constraints table -body {
     dbi_eval -transaction readcommitted {
         dbi_dml  {insert into test values (3, 'z')}
-        dbi_rows {select * from test order by a}
+        dbi_rows {select a, b from test order by a}
     }
 } -cleanup {
     dbi_dml {delete from test where a = 3}
@@ -177,7 +203,7 @@ test transaction-2 {transaction error w/rollback} -constraints table -body {
             error "error foo"
         }
     } errmsg]} {
-        list $errmsg [dbi_rows {select * from test order by a}]
+        list $errmsg [dbi_rows {select a, b from test order by a}]
     }
 } -result {{error foo} {1 x 2 y}}
 
@@ -189,11 +215,11 @@ test transaction-3 {nested transaction} -constraints table -body {
 			dbi_eval -transaction repeatable {
 				dbi_dml  {update test set b = 'Z' where a = 3}
 			}
-			dbi_rows {select * from test order by a}
+			dbi_rows {select a, b from test order by a}
 		}
 	} errmsg
 
-	list $errmsg [dbi_rows {select * from test order by a}]
+	list $errmsg [dbi_rows {select a, b from test order by a}]
 
 } -cleanup {
 	unset -nocomplain errmsg

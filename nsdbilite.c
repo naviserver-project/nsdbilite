@@ -340,7 +340,7 @@ PrepareClose(Dbi_Handle *handle, Dbi_Statement *stmt)
 
 static int
 Exec(Dbi_Handle *handle, Dbi_Statement *stmt,
-     CONST char **values, unsigned int *lengths, unsigned int nvalues)
+     Dbi_Value *values, unsigned int numValues)
 {
     LiteHandle   *ltHandle = handle->driverData;
     sqlite3_stmt *st = stmt->driverData;
@@ -351,9 +351,17 @@ Exec(Dbi_Handle *handle, Dbi_Statement *stmt,
      * NB: sqlite indexes variables from 1, nsdbi from 0.
      */
 
-    for (i = 0; i < nvalues; i++) {
-        if (sqlite3_bind_text(st, i+1, values[i], lengths[i],
-                              SQLITE_STATIC) != SQLITE_OK) {
+    for (i = 0; i < numValues; i++) {
+        if (values[i].data == NULL) {
+            rc = sqlite3_bind_null(st, i+1);
+        } else if (values[i].binary) {
+            rc = sqlite3_bind_blob(st, i+1, values[i].data, values[i].length,
+                                   SQLITE_STATIC);
+        } else {
+            rc = sqlite3_bind_text(st, i+1, values[i].data, values[i].length,
+                                   SQLITE_STATIC);
+        }
+        if (rc != SQLITE_OK) {
             ReportException(ltHandle);
             return NS_ERROR;
         }
@@ -515,7 +523,7 @@ NextValue(Dbi_Handle *handle, Dbi_Statement *stmt,
 
     default:
         /* SQLITE_TEXT (and all other types, which we return as text) */
-        value->data   = sqlite3_column_text(st, (int) colIdx);
+        value->data   = (char *) sqlite3_column_text(st, (int) colIdx);
         value->length = sqlite3_column_bytes(st, (int) colIdx);
         value->binary = 0;
     }
