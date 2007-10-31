@@ -38,6 +38,8 @@ ns_param   initfile        ${bindir}/init.tcl
 
 ns_section "ns/server/server1/modules"
 ns_param   pool1           $homedir/nsdbilite.so
+ns_param   thread           $homedir/nsdbilite.so
+
 
 #
 # Database configuration.
@@ -58,3 +60,6 @@ ns_param   maxopen         40          ;# Handle closed after maxopen seconds, r
 ns_param   maxqueries      100000      ;# Handle closed after maxqueries sql queries.
 ns_param   checkinterval   30          ;# Check for stale handles every 15 seconds.
 
+ns_section "ns/server/server1/module/thread"
+ns_param   datasource      :memory:    ;# in-memory database
+ns_param   maxhandles      0

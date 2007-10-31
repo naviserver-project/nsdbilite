@@ -72,6 +72,7 @@ static Dbi_TransactionProc  Transaction;
 static Dbi_FlushProc        Flush;
 static Dbi_ResetProc        Reset;
 
+static int Step(Dbi_Handle *handle, Dbi_Statement *stmt);
 static void ReportException(LiteHandle *ltHandle);
 
 
@@ -119,6 +120,8 @@ Ns_ModuleInit(CONST char *server, CONST char *module)
     char       *path;
     CONST char *drivername = "sqlite";
     CONST char *database   = "sqlite3";
+
+    Dbi_LibInit();
 
     path = Ns_ConfigGetPath(server, module, NULL);
 
@@ -280,7 +283,7 @@ Prepare(Dbi_Handle *handle, Dbi_Statement *stmt,
     const char   *tail;
 
     if (stmt->driverData == NULL) {
-        if (sqlite3_prepare(ltHandle->conn, stmt->sql, stmt->length, &st, &tail)
+        if (sqlite3_prepare_v2(ltHandle->conn, stmt->sql, stmt->length, &st, &tail)
                 != SQLITE_OK) {
             ReportException(ltHandle);
             return NS_ERROR;
@@ -313,11 +316,14 @@ Prepare(Dbi_Handle *handle, Dbi_Statement *stmt,
 static void
 PrepareClose(Dbi_Handle *handle, Dbi_Statement *stmt)
 {
+    LiteHandle   *ltHandle = handle->driverData;
     sqlite3_stmt *st = stmt->driverData;
 
     assert(st);
 
-    (void) sqlite3_finalize(st);
+    if (sqlite3_finalize(st) != SQLITE_OK) {
+        ReportException(ltHandle);
+    }
     stmt->driverData = NULL;
 }
 
@@ -344,8 +350,9 @@ Exec(Dbi_Handle *handle, Dbi_Statement *stmt,
 {
     LiteHandle   *ltHandle = handle->driverData;
     sqlite3_stmt *st = stmt->driverData;
-    const char   *tail;
-    int           rc, i, retries, status;
+    int           rc, i;
+
+    assert(st);
 
     /*
      * NB: sqlite indexes variables from 1, nsdbi from 0.
@@ -367,63 +374,24 @@ Exec(Dbi_Handle *handle, Dbi_Statement *stmt,
         }
     }
 
+    if (Dbi_NumColumns(handle) > 0) {
+        return NS_OK;
+    }
+
     /*
      * Step the state machine for DML commands as callers are not
      * expecting any rows and will not call NextValue.
      */
 
-    if (Dbi_NumColumns(handle)) {
-        return NS_OK;
-    }
+    rc = Step(handle, stmt);
 
-    retries = ltHandle->ltCfg->retries;
-    status = NS_ERROR;
-
-    do {
-        if ((rc = sqlite3_step(st)) == SQLITE_BUSY) {
-            Ns_ThreadYield();
-        }
-    } while (rc == SQLITE_BUSY && --retries > 0);
-
-    switch (rc) {
-
-    case SQLITE_BUSY:
-        Dbi_SetException(handle, "SQLIT", "dbisqlite: error executing statement: "
-            "database still busy after %d retries.", ltHandle->ltCfg->retries);
-        break;
-
-    case SQLITE_ROW:
+    if (rc == SQLITE_ROW) {
         Dbi_SetException(handle, "SQLIT",
-            "statement with 0 columns returned rows");
-        break;
-
-    case SQLITE_ERROR:
-        if (sqlite3_finalize(st) == SQLITE_SCHEMA) {
-            stmt->driverData = NULL;
-            if (sqlite3_prepare(ltHandle->conn, stmt->sql, stmt->length, &st, &tail)
-                    != SQLITE_OK) {
-                Dbi_SetException(handle, "SQLIT",
-                                 "schema change, reprepare failed: %s",
-                                 sqlite3_errmsg(ltHandle->conn));
-                /* FIXME: what now? statement invalid. */
-                break;
-            }
-            stmt->driverData = st;
-        } else {
-            ReportException(ltHandle);
-        }
-        break;
-
-    case SQLITE_MISUSE:
-        Dbi_SetException(handle, "SQLIT", "dbilite: Exec: Bug: SQLITE_MISUSE");
-        break;
-
-    case SQLITE_DONE:
-        status = NS_OK;
-        break;
+            "dbilite: Exec: Bug: DML statement returned rows");
+        return NS_ERROR;
     }
 
-    return status;
+    return (rc == SQLITE_DONE) ? NS_OK : NS_ERROR;
 }
 
 
@@ -445,61 +413,19 @@ Exec(Dbi_Handle *handle, Dbi_Statement *stmt,
 
 static int
 NextValue(Dbi_Handle *handle, Dbi_Statement *stmt,
-          unsigned int colIdx, unsigned int rowIdx, Dbi_Value *value)
+          Dbi_Value *value, int *endPtr)
 {
-    LiteHandle   *ltHandle = handle->driverData;
-    sqlite3_stmt *st       = stmt->driverData;
-    const char   *tail;
+    sqlite3_stmt *st = stmt->driverData;
     int           rc;
-    int           retries = ltHandle->ltCfg->retries;
 
-    if (colIdx == 0) {
+    if (value->colIdx == 0) {
 
-        /*
-         * Fetch a new row.
-         */
-
-        do {
-            if ((rc = sqlite3_step(st)) == SQLITE_BUSY) {
-                Ns_ThreadYield();
-            }
-        } while (rc == SQLITE_BUSY && --retries > 0);
-
-        switch (rc) {
-
-        case SQLITE_BUSY:
-            Dbi_SetException(handle, "SQLIT", "dbilite: error executing statement: "
-                             "database still busy after %d retries.",
-                             ltHandle->ltCfg->retries);
-            return DBI_ERROR;
-
-        case SQLITE_ERROR:
-            if (sqlite3_finalize(st) == SQLITE_SCHEMA) {
-                stmt->driverData = NULL;
-                if (sqlite3_prepare(ltHandle->conn, stmt->sql, stmt->length, &st, &tail)
-                        != SQLITE_OK) {
-                    Dbi_SetException(handle, "SQLIT",
-                                     "schema change, reprepare failed: %s",
-                                     sqlite3_errmsg(ltHandle->conn));
-                    /* FIXME: what now? statement invalid. */
-                    return DBI_ERROR;
-                }
-                stmt->driverData = st;
-            } else {
-                ReportException(ltHandle);
-            }
-            return DBI_ERROR;
-
-        case SQLITE_MISUSE:
-            Dbi_SetException(handle, "SQLIT", "dbilite: NextValue: Bug: SQLITE_MISUSE");
-            return DBI_ERROR;
-
-        case SQLITE_DONE:
-            return DBI_DONE;
-
-        case SQLITE_ROW:
-            /* NB: handled below. */
-            break;
+        if ((rc = Step(handle, stmt)) == SQLITE_ERROR) {
+            return NS_ERROR;
+        }
+        if (rc == SQLITE_DONE) {
+            *endPtr = 1;
+            return NS_OK;
         }
     }
 
@@ -507,7 +433,7 @@ NextValue(Dbi_Handle *handle, Dbi_Statement *stmt,
      * Handle data for current valid row.
      */
 
-    switch (sqlite3_column_type(st, (int) colIdx)) {
+    switch (sqlite3_column_type(st, (int) value->colIdx)) {
 
     case SQLITE_NULL:
         value->data   = NULL;
@@ -516,19 +442,22 @@ NextValue(Dbi_Handle *handle, Dbi_Statement *stmt,
         break;
 
     case SQLITE_BLOB:
-        value->data   = sqlite3_column_blob(st, (int) colIdx);
-        value->length = sqlite3_column_bytes(st, (int) colIdx);
+        value->data   = sqlite3_column_blob(st, (int) value->colIdx);
+        value->length = sqlite3_column_bytes(st, (int) value->colIdx);
         value->binary = 1;
         break;
 
+    case SQLITE_TEXT:
     default:
-        /* SQLITE_TEXT (and all other types, which we return as text) */
-        value->data   = (char *) sqlite3_column_text(st, (int) colIdx);
-        value->length = sqlite3_column_bytes(st, (int) colIdx);
+        value->data   = (char *) sqlite3_column_text(st, (int) value->colIdx);
+        value->length = sqlite3_column_bytes(st, (int) value->colIdx);
         value->binary = 0;
+        break;
     }
 
-    return DBI_VALUE;
+    *endPtr = 0;
+
+    return NS_OK;
 }
 
 
@@ -678,6 +607,67 @@ static int
 Reset(Dbi_Handle *handle)
 {
     return NS_OK;
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * Step --
+ *
+ *      Step the sqlite state machine for a statement.
+ *
+ * Results:
+ *      An sqlite result code: SQLITE_ROW, SQLITE_DONE, SQLITE_ERROR.
+ *
+ * Side effects:
+ *      May retry the step if busy or recompile the statement on
+ *      schema change.
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+Step(Dbi_Handle *handle, Dbi_Statement *stmt)
+{
+    LiteHandle   *ltHandle = handle->driverData;
+    sqlite3_stmt *st = stmt->driverData;
+    int           rc, retries;
+
+    retries = ltHandle->ltCfg->retries;
+
+    do {
+        if ((rc = sqlite3_step(st)) == SQLITE_BUSY) {
+            Ns_ThreadYield();
+        }
+    } while (rc == SQLITE_BUSY && --retries > 0);
+
+    switch (rc) {
+
+    case SQLITE_ROW:
+    case SQLITE_DONE:
+        /* NB: handled by caller. */
+        break;
+
+    case SQLITE_BUSY:
+        Dbi_SetException(handle, "SQLIT", "dbisqlite: error executing statement: "
+            "database still busy after %d retries.", ltHandle->ltCfg->retries);
+        rc = SQLITE_ERROR;
+        break;
+
+    case SQLITE_MISUSE:
+        Dbi_SetException(handle, "SQLIT", "dbilite: Bug: SQLITE_MISUSE");
+        rc = SQLITE_ERROR;
+        break;
+
+    case SQLITE_ERROR:
+    default:
+        ReportException(ltHandle);
+        rc = SQLITE_ERROR;
+        break;
+    }
+
+    return rc;
 }
 
 

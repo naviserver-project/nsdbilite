@@ -46,11 +46,11 @@ if {[catch {
             c blob
         )
     }
-    dbi_dml {insert into test values (1, 'x')}
-    dbi_dml {insert into test values (2, 'y')}
+    dbi_dml {insert into test (a, b) values (1, 'x')}
+    dbi_dml {insert into test (a, b) values (2, 'y')}
 
 } err]} {
-    ns_log error $err
+    ns_log error "Test setup error: $err"
 } else {
     testConstraint table true
 }
@@ -166,7 +166,7 @@ test bind-3 {bind nulls} -body {
 	dbi_dml {insert into test (a, b) values (:a, :b)}
 } -cleanup {
 	unset -nocomplain a b
-} -returnCodes error -match glob -result {*NULL*}
+} -returnCodes error -result {constraint failed}
 
 test bind-4 {bind binary w/binary result} -body {
 	set a 9
@@ -189,7 +189,7 @@ test bind-4 {bind binary w/binary result} -body {
 
 test transaction-1 {transaction ok} -constraints table -body {
     dbi_eval -transaction readcommitted {
-        dbi_dml  {insert into test values (3, 'z')}
+        dbi_dml  {insert into test (a, b) values (3, 'z')}
         dbi_rows {select a, b from test order by a}
     }
 } -cleanup {
@@ -199,7 +199,7 @@ test transaction-1 {transaction ok} -constraints table -body {
 test transaction-2 {transaction error w/rollback} -constraints table -body {
     if {[catch {
         dbi_eval -transaction repeatable {
-            dbi_dml {insert into test values (3, 'z')}
+            dbi_dml {insert into test (a, b) values (3, 'z')}
             error "error foo"
         }
     } errmsg]} {
@@ -211,7 +211,7 @@ test transaction-3 {nested transaction} -constraints table -body {
 	set errmsg ""
 	catch {
 		dbi_eval -transaction repeatable {
-			dbi_dml  {insert into test values (3, 'z')}
+			dbi_dml  {insert into test (a, b) values (3, 'z')}
 			dbi_eval -transaction repeatable {
 				dbi_dml  {update test set b = 'Z' where a = 3}
 			}
@@ -224,6 +224,25 @@ test transaction-3 {nested transaction} -constraints table -body {
 } -cleanup {
 	unset -nocomplain errmsg
 } -result {{dbilite does not support nested transactions} {1 x 2 y}}
+
+
+
+
+
+
+test thread-1 {per-thread handles} -body {
+    ns_thread wait [ns_thread begin {
+        dbi_dml -pool thread {
+            create table test (
+              a integer not null,
+              b varchar not null,
+              c blob
+            )
+        }
+        dbi_dml -pool thread {insert into test (a, b) values (1, 'x')}
+        dbi_rows -pool thread {select a, b from test}
+    }]
+} -result {1 x}
 
 
 
