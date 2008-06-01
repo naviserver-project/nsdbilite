@@ -102,8 +102,8 @@ test 1row-2 {expect missing row} -constraints table -body {
     dbi_1row {select b from test where a = 99}
 } -returnCodes error -result {query was not a statement returning rows}
 
-test 1row-3 {rollback suprise dml} -constraints {knownBug table} -body {
-    catch {dbi_1row {insert into test values (0, 'zzz')}} errmsg
+test 1row-3 {rollback suprise dml} -constraints table -body {
+    catch {dbi_1row {insert into test values (0, 'zzz', NULL)}} errmsg
     list $errmsg [dbi_rows {select a, b from test}]
 } -result {{query was not a statement returning rows} {1 x 2 y}}
 
@@ -140,7 +140,7 @@ test dml-2 {duplicate statement: dml} -constraints {table knownBug} -body {
 
 test dml-3 {not dml} -constraints table -body {
 	dbi_dml {select a, b from test}
-} -returnCodes error -result {query was not a DML or DDL command.}
+} -returnCodes error -result {query was not a DML or DDL command}
 
 
 
