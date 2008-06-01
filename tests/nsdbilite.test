@@ -232,15 +232,15 @@ test transaction-3 {nested transaction} -constraints table -body {
 
 test thread-1 {per-thread handles} -body {
     ns_thread wait [ns_thread begin {
-        dbi_dml -pool thread {
+        dbi_dml -db thread {
             create table test (
               a integer not null,
               b varchar not null,
               c blob
             )
         }
-        dbi_dml -pool thread {insert into test (a, b) values (1, 'x')}
-        dbi_rows -pool thread {select a, b from test}
+        dbi_dml -db thread {insert into test (a, b) values (1, 'x')}
+        dbi_rows -db thread {select a, b from test}
     }]
 } -result {1 x}
 

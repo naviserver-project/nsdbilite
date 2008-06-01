@@ -66,7 +66,9 @@ static Dbi_BindVarProc      Bind;
 static Dbi_PrepareProc      Prepare;
 static Dbi_PrepareCloseProc PrepareClose;
 static Dbi_ExecProc         Exec;
-static Dbi_NextValueProc    NextValue;
+static Dbi_NextRowProc      NextRow;
+static Dbi_ColumnLengthProc ColumnLength;
+static Dbi_ColumnValueProc  ColumnValue;
 static Dbi_ColumnNameProc   ColumnName;
 static Dbi_TransactionProc  Transaction;
 static Dbi_FlushProc        Flush;
@@ -88,7 +90,9 @@ static Dbi_DriverProc procs[] = {
     {Dbi_PrepareProcId,      Prepare},
     {Dbi_PrepareCloseProcId, PrepareClose},
     {Dbi_ExecProcId,         Exec},
-    {Dbi_NextValueProcId,    NextValue},
+    {Dbi_NextRowProcId,      NextRow},
+    {Dbi_ColumnLengthProcId, ColumnLength},
+    {Dbi_ColumnValueProcId,  ColumnValue},
     {Dbi_ColumnNameProcId,   ColumnName},
     {Dbi_TransactionProcId,  Transaction},
     {Dbi_FlushProcId,        Flush},
@@ -398,12 +402,51 @@ Exec(Dbi_Handle *handle, Dbi_Statement *stmt,
 /*
  *----------------------------------------------------------------------
  *
- * NextValue --
+ * NextRow --
  *
- *      Fetch the value of the given row and column.
+ *      Fetch the next row of the result set.
  *
  * Results:
- *      DBI_VALUE, DBI_DONE or DBI_ERROR.
+ *      NS_OK or NS_ERROR, endPtr set to 1 after last row fetched.
+ *
+ * Side effects:
+ *      The fetch may be retried if busy; see: Step().
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+NextRow(Dbi_Handle *handle, Dbi_Statement *stmt, int *endPtr)
+{
+    int  status;
+
+    switch (Step(handle, stmt)) {
+    case SQLITE_ROW:
+        status = NS_OK;
+        break;
+    case SQLITE_DONE:
+        *endPtr = 1;
+        status = NS_OK;
+        break;
+    case SQLITE_ERROR:
+        status = NS_ERROR;
+        break;
+    }
+
+    return status;
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * ColumnLength --
+ *
+ *      Return the length of the column value and it's text/binary
+ *      type after a NextRow(). Null values are 0 length.
+ *
+ * Results:
+ *      NS_OK;
  *
  * Side effects:
  *      None.
@@ -412,50 +455,47 @@ Exec(Dbi_Handle *handle, Dbi_Statement *stmt,
  */
 
 static int
-NextValue(Dbi_Handle *handle, Dbi_Statement *stmt,
-          Dbi_Value *value, int *endPtr)
+ColumnLength(Dbi_Handle *handle, Dbi_Statement *stmt, unsigned int index,
+             size_t *lengthPtr, int *binaryPtr)
 {
     sqlite3_stmt *st = stmt->driverData;
-    int           rc;
 
-    if (value->colIdx == 0) {
+    *lengthPtr = sqlite3_column_bytes(st, (int) index);
+    *binaryPtr = (sqlite3_column_type(st, (int) index) == SQLITE_BLOB);
 
-        if ((rc = Step(handle, stmt)) == SQLITE_ERROR) {
-            return NS_ERROR;
-        }
-        if (rc == SQLITE_DONE) {
-            *endPtr = 1;
-            return NS_OK;
-        }
+    return NS_OK;
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * ColumnValue --
+ *
+ *      Fetch the indicated value from the current row.
+ *
+ * Results:
+ *      NS_OK.
+ *
+ * Side effects:
+ *      None.
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+ColumnValue(Dbi_Handle *handle, Dbi_Statement *stmt, unsigned int index,
+            char *value, size_t length)
+{
+    sqlite3_stmt *st = stmt->driverData;
+    const char   *src;
+
+    if (sqlite3_column_type(st, (int) index) == SQLITE_BLOB) {
+        src = sqlite3_column_blob(st, (int) index);
+    } else {
+        src = (const char *) sqlite3_column_text(st, (int) index);
     }
-
-    /*
-     * Handle data for current valid row.
-     */
-
-    switch (sqlite3_column_type(st, (int) value->colIdx)) {
-
-    case SQLITE_NULL:
-        value->data   = NULL;
-        value->length = 0;
-        value->binary = 0;
-        break;
-
-    case SQLITE_BLOB:
-        value->data   = sqlite3_column_blob(st, (int) value->colIdx);
-        value->length = sqlite3_column_bytes(st, (int) value->colIdx);
-        value->binary = 1;
-        break;
-
-    case SQLITE_TEXT:
-    default:
-        value->data   = (char *) sqlite3_column_text(st, (int) value->colIdx);
-        value->length = sqlite3_column_bytes(st, (int) value->colIdx);
-        value->binary = 0;
-        break;
-    }
-
-    *endPtr = 0;
+    memcpy(value, src, MIN(length, sqlite3_column_bytes(st, (int) index)));
 
     return NS_OK;
 }
