@@ -1,0 +1,9 @@
+
+2008-06-10 nsdbilite-0.2 released
+
+* Update for new nsdbi-0.2 interface
+
+
+2008-04-17 nsdbilite-0.1 released
+
+Initial release of a new sqlite driver for the nsdbi interface.
