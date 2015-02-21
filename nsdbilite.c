@@ -121,7 +121,7 @@ NS_EXPORT int
 Ns_ModuleInit(CONST char *server, CONST char *module)
 {
     LiteConfig *ltCfg;
-    char       *path;
+    const char *path;
     CONST char *drivername = "sqlite";
     CONST char *database   = "sqlite3";
 
