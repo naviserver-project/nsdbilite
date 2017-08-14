@@ -74,6 +74,8 @@ static Dbi_TransactionProc  Transaction;
 static Dbi_FlushProc        Flush;
 static Dbi_ResetProc        Reset;
 
+NS_EXPORT Ns_ModuleInitProc Ns_ModuleInit;
+
 static int Step(Dbi_Handle *handle, Dbi_Statement *stmt);
 static void ReportException(LiteHandle *ltHandle);
 
@@ -83,20 +85,20 @@ static void ReportException(LiteHandle *ltHandle);
  */
 
 static Dbi_DriverProc procs[] = {
-    {Dbi_OpenProcId,         Open},
-    {Dbi_CloseProcId,        Close},
-    {Dbi_ConnectedProcId,    Connected},
-    {Dbi_BindVarProcId,      Bind},
-    {Dbi_PrepareProcId,      Prepare},
-    {Dbi_PrepareCloseProcId, PrepareClose},
-    {Dbi_ExecProcId,         Exec},
-    {Dbi_NextRowProcId,      NextRow},
-    {Dbi_ColumnLengthProcId, ColumnLength},
-    {Dbi_ColumnValueProcId,  ColumnValue},
-    {Dbi_ColumnNameProcId,   ColumnName},
-    {Dbi_TransactionProcId,  Transaction},
-    {Dbi_FlushProcId,        Flush},
-    {Dbi_ResetProcId,        Reset},
+    {Dbi_OpenProcId,         (Ns_Callback *)Open},
+    {Dbi_CloseProcId,        (Ns_Callback *)Close},
+    {Dbi_ConnectedProcId,    (Ns_Callback *)Connected},
+    {Dbi_BindVarProcId,      (Ns_Callback *)Bind},
+    {Dbi_PrepareProcId,      (Ns_Callback *)Prepare},
+    {Dbi_PrepareCloseProcId, (Ns_Callback *)PrepareClose},
+    {Dbi_ExecProcId,         (Ns_Callback *)Exec},
+    {Dbi_NextRowProcId,      (Ns_Callback *)NextRow},
+    {Dbi_ColumnLengthProcId, (Ns_Callback *)ColumnLength},
+    {Dbi_ColumnValueProcId,  (Ns_Callback *)ColumnValue},
+    {Dbi_ColumnNameProcId,   (Ns_Callback *)ColumnName},
+    {Dbi_TransactionProcId,  (Ns_Callback *)Transaction},
+    {Dbi_FlushProcId,        (Ns_Callback *)Flush},
+    {Dbi_ResetProcId,        (Ns_Callback *)Reset},
     {0, NULL}
 };
 
@@ -256,7 +258,7 @@ Connected(Dbi_Handle *handle)
  */
 
 static void
-Bind(Ns_DString *ds, CONST char *name, int bindIdx)
+Bind(Ns_DString *ds, const char *UNUSED(name), int UNUSED(bindIdx))
 {
     Ns_DStringAppend(ds, "?");
 }
@@ -292,8 +294,8 @@ Prepare(Dbi_Handle *handle, Dbi_Statement *stmt,
             ReportException(ltHandle);
             return NS_ERROR;
         }
-        *numVarsPtr = sqlite3_bind_parameter_count(st);
-        *numColsPtr = sqlite3_column_count(st);
+        *numVarsPtr = (unsigned int)sqlite3_bind_parameter_count(st);
+        *numColsPtr = (unsigned int)sqlite3_column_count(st);
         stmt->driverData = st;
     }
 
@@ -354,7 +356,8 @@ Exec(Dbi_Handle *handle, Dbi_Statement *stmt,
 {
     LiteHandle   *ltHandle = handle->driverData;
     sqlite3_stmt *st = stmt->driverData;
-    int           rc, i;
+    int           rc;
+    unsigned int  i;
 
     assert(st);
 
@@ -362,14 +365,14 @@ Exec(Dbi_Handle *handle, Dbi_Statement *stmt,
      * NB: sqlite indexes variables from 1, nsdbi from 0.
      */
 
-    for (i = 0; i < numValues; i++) {
+    for (i = 0u; i < numValues; i++) {
         if (values[i].data == NULL) {
-            rc = sqlite3_bind_null(st, i+1);
+            rc = sqlite3_bind_null(st, (int)i+1);
         } else if (values[i].binary) {
-            rc = sqlite3_bind_blob(st, i+1, values[i].data, values[i].length,
+            rc = sqlite3_bind_blob(st, (int)i+1, values[i].data, (int)values[i].length,
                                    SQLITE_STATIC);
         } else {
-            rc = sqlite3_bind_text(st, i+1, values[i].data, values[i].length,
+            rc = sqlite3_bind_text(st, (int)i+1, values[i].data, (int)values[i].length,
                                    SQLITE_STATIC);
         }
         if (rc != SQLITE_OK) {
@@ -455,12 +458,12 @@ NextRow(Dbi_Handle *handle, Dbi_Statement *stmt, int *endPtr)
  */
 
 static int
-ColumnLength(Dbi_Handle *handle, Dbi_Statement *stmt, unsigned int index,
+ColumnLength(Dbi_Handle *UNUSED(handle), Dbi_Statement *stmt, unsigned int index,
              size_t *lengthPtr, int *binaryPtr)
 {
     sqlite3_stmt *st = stmt->driverData;
 
-    *lengthPtr = sqlite3_column_bytes(st, (int) index);
+    *lengthPtr = (size_t)sqlite3_column_bytes(st, (int) index);
     *binaryPtr = (sqlite3_column_type(st, (int) index) == SQLITE_BLOB);
 
     return NS_OK;
@@ -484,7 +487,7 @@ ColumnLength(Dbi_Handle *handle, Dbi_Statement *stmt, unsigned int index,
  */
 
 static int
-ColumnValue(Dbi_Handle *handle, Dbi_Statement *stmt, unsigned int index,
+ColumnValue(Dbi_Handle *UNUSED(handle), Dbi_Statement *stmt, unsigned int index,
             char *value, size_t length)
 {
     sqlite3_stmt *st = stmt->driverData;
@@ -495,7 +498,7 @@ ColumnValue(Dbi_Handle *handle, Dbi_Statement *stmt, unsigned int index,
     } else {
         src = (const char *) sqlite3_column_text(st, (int) index);
     }
-    memcpy(value, src, MIN(length, sqlite3_column_bytes(st, (int) index)));
+    memcpy(value, src, MIN((int)length, sqlite3_column_bytes(st, (int) index)));
 
     return NS_OK;
 }
@@ -518,12 +521,12 @@ ColumnValue(Dbi_Handle *handle, Dbi_Statement *stmt, unsigned int index,
  */
 
 static int
-ColumnName(Dbi_Handle *handle, Dbi_Statement *stmt,
-           unsigned int index, CONST char **column)
+ColumnName(Dbi_Handle *UNUSED(handle), Dbi_Statement *stmt,
+           unsigned int index, const char **column)
 {
     sqlite3_stmt *st = stmt->driverData;
 
-    *column = sqlite3_column_name(st, index);
+    *column = sqlite3_column_name(st, (int)index);
     if (*column == NULL) {
         return NS_ERROR;
     }
@@ -644,7 +647,7 @@ Flush(Dbi_Handle *handle, Dbi_Statement *stmt)
  */
 
 static int
-Reset(Dbi_Handle *handle)
+Reset(Dbi_Handle *UNUSED(handle))
 {
     return NS_OK;
 }
@@ -736,3 +739,12 @@ ReportException(LiteHandle *ltHandle)
     }
     Dbi_SetException(ltHandle->handle, "SQLIT", "%s", sqlite3_errmsg(ltHandle->conn));
 }
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * indent-tabs-mode: nil
+ * End:
+ */
