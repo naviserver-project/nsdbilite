@@ -164,7 +164,7 @@ Open(ClientData configData, Dbi_Handle *handle)
     sqlite3    *conn;
 
     if (sqlite3_open(ltCfg->datasource, &conn) != SQLITE_OK) {
-        Dbi_SetException(handle, "SQLIT", sqlite3_errmsg(conn));
+        Dbi_SetException(handle, "SQLIT", "%s", sqlite3_errmsg(conn));
         (void) sqlite3_close(conn);
         return NS_ERROR;
     }
@@ -620,7 +620,7 @@ Flush(Dbi_Handle *handle, Dbi_Statement *stmt)
         return NS_ERROR;
     }
 /*     if (sqlite3_clear_bindings(st) != SQLITE_OK) { */
-/*         Dbi_SetException(handle, "SQLIT", sqlite3_errmsg(sq->conn)); */
+/*         Dbi_SetException(handle, "SQLIT", "%s", sqlite3_errmsg(sq->conn)); */
 /*         return NS_ERROR; */
 /*     } */
     return NS_OK;
@@ -734,5 +734,5 @@ ReportException(LiteHandle *ltHandle)
         Ns_Fatal("dbilite: SQLITE_NOMEM: %s",
                  sqlite3_errmsg(ltHandle->conn));
     }
-    Dbi_SetException(ltHandle->handle, "SQLIT", sqlite3_errmsg(ltHandle->conn));
+    Dbi_SetException(ltHandle->handle, "SQLIT", "%s", sqlite3_errmsg(ltHandle->conn));
 }
