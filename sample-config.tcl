@@ -2,7 +2,7 @@
 # nsdbilite configuration example.
 #
 #     The nsdbilite SQLite database driver takes two
-#     extra configuration parmeters: datasource and sqlitebusyretries.
+#     extra configuration parameters: datasource and sqlitebusyretries.
 #
 #     datasource: a path in the filesystem, or the special token :memory:
 #     sqlitebusyretries: default 100
