@@ -258,9 +258,9 @@ Connected(Dbi_Handle *handle)
  */
 
 static void
-Bind(Ns_DString *ds, const char *UNUSED(name), int UNUSED(bindIdx))
+Bind(Tcl_DString *ds, const char *UNUSED(name), int UNUSED(bindIdx))
 {
-    Ns_DStringAppend(ds, "?");
+    Tcl_DStringAppend(ds, "?", TCL_INDEX_NONE);
 }
 
 
