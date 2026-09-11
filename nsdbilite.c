@@ -85,20 +85,20 @@ static void ReportException(LiteHandle *ltHandle);
  */
 
 static Dbi_DriverProc procs[] = {
-    {Dbi_OpenProcId,         (Ns_Callback *)Open},
-    {Dbi_CloseProcId,        (Ns_Callback *)Close},
-    {Dbi_ConnectedProcId,    (Ns_Callback *)Connected},
-    {Dbi_BindVarProcId,      (Ns_Callback *)Bind},
-    {Dbi_PrepareProcId,      (Ns_Callback *)Prepare},
-    {Dbi_PrepareCloseProcId, (Ns_Callback *)PrepareClose},
-    {Dbi_ExecProcId,         (Ns_Callback *)Exec},
-    {Dbi_NextRowProcId,      (Ns_Callback *)NextRow},
-    {Dbi_ColumnLengthProcId, (Ns_Callback *)ColumnLength},
-    {Dbi_ColumnValueProcId,  (Ns_Callback *)ColumnValue},
-    {Dbi_ColumnNameProcId,   (Ns_Callback *)ColumnName},
-    {Dbi_TransactionProcId,  (Ns_Callback *)Transaction},
-    {Dbi_FlushProcId,        (Ns_Callback *)Flush},
-    {Dbi_ResetProcId,        (Ns_Callback *)Reset},
+    {Dbi_OpenProcId,         .u.openProc         = Open},
+    {Dbi_CloseProcId,        .u.closeProc        = Close},
+    {Dbi_ConnectedProcId,    .u.connectedProc    = Connected},
+    {Dbi_BindVarProcId,      .u.bindVarProc      = Bind},
+    {Dbi_PrepareProcId,      .u.prepareProc      = Prepare},
+    {Dbi_PrepareCloseProcId, .u.prepareCloseProc = PrepareClose},
+    {Dbi_ExecProcId,         .u.execProc         = Exec},
+    {Dbi_NextRowProcId,      .u.nextRowProc      = NextRow},
+    {Dbi_ColumnLengthProcId, .u.columnLengthProc = ColumnLength},
+    {Dbi_ColumnValueProcId,  .u.columnValueProc  = ColumnValue},
+    {Dbi_ColumnNameProcId,   .u.columnNameProc   = ColumnName},
+    {Dbi_TransactionProcId,  .u.transProc        = Transaction},
+    {Dbi_FlushProcId,        .u.flushProc        = Flush},
+    {Dbi_ResetProcId,        .u.resetProc        = Reset},
     {0, NULL}
 };
 
